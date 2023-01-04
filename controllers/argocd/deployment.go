@@ -894,6 +894,7 @@ func (r *ReconcileArgoCD) reconcileRepoDeployment(cr *argoprojv1a1.ArgoCD, useTL
 				},
 			},
 			RunAsNonRoot: boolPtr(true),
+			RunAsUser:    int64Ptr(999),
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
@@ -1205,6 +1206,7 @@ func (r *ReconcileArgoCD) reconcileServerDeployment(cr *argoprojv1a1.ArgoCD, use
 				},
 			},
 			RunAsNonRoot: boolPtr(true),
+			RunAsUser:    int64Ptr(999),
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{

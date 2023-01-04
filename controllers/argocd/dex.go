@@ -263,6 +263,7 @@ func (r *ReconcileArgoCD) reconcileDexDeployment(cr *argoprojv1a1.ArgoCD) error 
 				},
 			},
 			RunAsNonRoot: boolPtr(true),
+			RunAsUser:    int64Ptr(999),
 		},
 		VolumeMounts: []corev1.VolumeMount{{
 			Name:      "static-files",
