@@ -826,7 +826,9 @@ func (r *ReconcileArgoCD) reconcileResources(cr *argoprojv1a1.ArgoCD) error {
 	}
 
 	if cr.Spec.Notifications.Enabled {
-		log.Info("reconciling Notifications controller")
+		log.Info("reconciling Notifications controller --- test")
+		log.Info("*** in reconcileResources !")
+		log.Info(fmt.Sprintf("cr.Spec.Notifications.Enabled: %v", cr.Spec.Notifications.Enabled))
 		if err := r.reconcileNotificationsController(cr); err != nil {
 			return err
 		}
