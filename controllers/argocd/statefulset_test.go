@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	resourcev1 "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -369,6 +370,38 @@ func TestReconcileArgoCD_reconcileApplicationController_withSharding(t *testing.
 		if diffRep != "" {
 			t.Fatalf("Reconciliation of Replicas failed:\n%s", diffRep)
 		}
+	}
+}
+
+func TestReconcileArgoCD_reconcileApplicationController_withAppSync(t *testing.T) {
+
+	expectedEnv := []corev1.EnvVar{
+		{Name: "ARGOCD_RECONCILIATION_TIMEOUT", Value: "600s"},
+		{Name: "HOME", Value: "/home/argocd"},
+	}
+
+	a := makeTestArgoCD(func(a *argoprojv1alpha1.ArgoCD) {
+		a.Spec.Controller.AppSync = &metav1.Duration{Duration: time.Minute * 10}
+	})
+	r := makeTestReconciler(t, a)
+
+	assert.NoError(t, r.reconcileApplicationControllerStatefulSet(a, false))
+
+	ss := &appsv1.StatefulSet{}
+	assert.NoError(t, r.Client.Get(
+		context.TODO(),
+		types.NamespacedName{
+			Name:      "argocd-application-controller",
+			Namespace: a.Namespace,
+		},
+		ss))
+
+	env := ss.Spec.Template.Spec.Containers[0].Env
+
+	diffEnv := cmp.Diff(env, expectedEnv)
+
+	if diffEnv != "" {
+		t.Fatalf("Reconciliation of EnvVars failed:\n%s", diffEnv)
 	}
 }
 
