@@ -1404,10 +1404,11 @@ func (r *ReconcileArgoCD) setManagedSourceNamespaces(cr *argoproj.ArgoCD) error 
 	if err := r.Client.List(context.TODO(), namespaces, listOption); err != nil {
 		return err
 	}
-
+	r.ManagedSourceNamespacesMutex.Lock()
 	for _, namespace := range namespaces.Items {
 		r.ManagedSourceNamespaces[namespace.Name] = ""
 	}
+	r.ManagedSourceNamespacesMutex.Unlock()
 
 	return nil
 }
@@ -1425,7 +1426,9 @@ func (r *ReconcileArgoCD) removeUnmanagedSourceNamespaceResources(ctx context.Co
 			if err := r.cleanupUnmanagedSourceNamespaceResources(ctx, cr, ns); err != nil {
 				return fmt.Errorf("error cleaning up resources for namespace %s: %v", ns, err)
 			}
+			r.ManagedSourceNamespacesMutex.Lock()
 			delete(r.ManagedSourceNamespaces, ns)
+			r.ManagedSourceNamespacesMutex.Unlock()
 		}
 	}
 	return nil

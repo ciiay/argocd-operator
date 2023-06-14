@@ -216,7 +216,9 @@ func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx contex
 			log.Info(fmt.Sprintf("Skipping reconciling resources for namespace %s as it is already managed-by namespace %s.", namespace.Name, managedByLabelval))
 			// if managed-by-cluster-argocd label is also present, remove the namespace from the ManagedSourceNamespaces.
 			if isManagedByClusterArgoCDLabelPresent && managedByClusterArgocdVal == cr.Namespace {
+				r.ManagedSourceNamespacesMutex.Lock()
 				delete(r.ManagedSourceNamespaces, namespace.Name)
+				r.ManagedSourceNamespacesMutex.Unlock()
 				if err := r.cleanupUnmanagedSourceNamespaceResources(ctx, cr, namespace.Name); err != nil {
 					log.Error(err, fmt.Sprintf("error cleaning up resources for namespace %s", namespace.Name))
 				}
@@ -239,7 +241,7 @@ func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx contex
 			// as it already contains roles reconciled during reconcilation of ManagedNamespaces
 			if _, ok := r.ManagedSourceNamespaces[sourceNamespace]; ok {
 				// If sourceNamespace includes the name but role is missing in the namespace, create the role
-				if reflect.DeepEqual(existingRole, v1.Role{}) {
+				if existingRole.Name == "" {
 					log.Info(fmt.Sprintf("creating role %s for Argo CD instance %s in namespace %s", role.Name, cr.Name, namespace))
 					if err := r.Client.Create(ctx, role); err != nil {
 						return fmt.Errorf("failed to create role for %s: %w", name, err)
@@ -271,9 +273,11 @@ func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx contex
 				}
 			}
 
+			r.ManagedSourceNamespacesMutex.Lock()
 			if _, ok := r.ManagedSourceNamespaces[sourceNamespace]; !ok {
 				r.ManagedSourceNamespaces[sourceNamespace] = ""
 			}
+			r.ManagedSourceNamespacesMutex.Unlock()
 		}
 	}
 	return nil

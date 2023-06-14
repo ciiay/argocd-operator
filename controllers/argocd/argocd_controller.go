@@ -19,6 +19,7 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	argoproj "github.com/argoproj-labs/argocd-operator/api/v1alpha1"
 
@@ -42,7 +43,8 @@ type ReconcileArgoCD struct {
 	Scheme            *runtime.Scheme
 	ManagedNamespaces *corev1.NamespaceList
 	// Stores a list of SourceNamespaces as values
-	ManagedSourceNamespaces map[string]string
+	ManagedSourceNamespaces      map[string]string
+	ManagedSourceNamespacesMutex sync.Mutex
 }
 
 var log = logr.Log.WithName("controller_argocd")
