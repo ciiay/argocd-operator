@@ -19,6 +19,7 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	argoproj "github.com/argoproj-labs/argocd-operator/api/v1alpha1"
 
@@ -43,6 +44,7 @@ type ReconcileArgoCD struct {
 	ManagedNamespaces *corev1.NamespaceList
 	// Stores a list of SourceNamespaces as values
 	ManagedSourceNamespaces map[string]string
+	Mutex                   sync.Mutex
 }
 
 var log = logr.Log.WithName("controller_argocd")
@@ -112,9 +114,7 @@ func (r *ReconcileArgoCD) Reconcile(ctx context.Context, request ctrl.Request) (
 
 			// remove namespace of deleted Argo CD instance from deprecationEventEmissionTracker (if exists) so that if another instance
 			// is created in the same namespace in the future, that instance is appropriately tracked
-			if _, ok := DeprecationEventEmissionTracker[argocd.Namespace]; ok {
-				delete(DeprecationEventEmissionTracker, argocd.Namespace)
-			}
+			delete(DeprecationEventEmissionTracker, argocd.Namespace)
 		}
 		return reconcile.Result{}, nil
 	}

@@ -142,9 +142,8 @@ func TestReconcileArgoCD_reconcileRoleForApplicationSourceNamespaces(t *testing.
 	reconciledRole := &v1.Role{}
 
 	// check if roles are created for the new namespace
-	assert.NoError(t, r.Client.Get(context.TODO(), types.NamespacedName{Name: expectedName, Namespace: sourceNamespace}, reconciledRole))
+	assert.NoError(t, r.Client.Get(ctx, types.NamespacedName{Name: expectedName, Namespace: sourceNamespace}, reconciledRole))
 	assert.Equal(t, expectedRules, reconciledRole.Rules)
-
 }
 
 func TestReconcileArgoCD_RoleHooks(t *testing.T) {
