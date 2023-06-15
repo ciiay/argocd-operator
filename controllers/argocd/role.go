@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -201,7 +202,7 @@ func (r *ReconcileArgoCD) reconcileRole(name string, policyRules []v1.PolicyRule
 func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx context.Context, name string, policyRules []v1.PolicyRule, cr *argoprojv1a1.ArgoCD) error {
 	// create policy rules for each source namespace for ArgoCD Server
 	for _, sourceNamespace := range cr.Spec.SourceNamespaces {
-
+		existingRole := v1.Role{}
 		namespace := &corev1.Namespace{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: sourceNamespace}, namespace); err != nil {
 			return err
@@ -229,7 +230,7 @@ func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx contex
 				return fmt.Errorf("failed to apply reconciler hook for %s: %w", name, err)
 			}
 			role.Namespace = namespace.Name
-			existingRole := v1.Role{}
+
 			err := r.Client.Get(ctx, types.NamespacedName{Name: role.Name, Namespace: namespace.Name}, &existingRole)
 			if err != nil && !errors.IsNotFound(err) {
 				return fmt.Errorf("failed to reconcile the role for the service account associated with %s: %w", name, err)
@@ -239,7 +240,7 @@ func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx contex
 			// as it already contains roles reconciled during reconcilation of ManagedNamespaces
 			if _, ok := r.ManagedSourceNamespaces[sourceNamespace]; ok {
 				// If sourceNamespace includes the name but role is missing in the namespace, create the role
-				if reflect.DeepEqual(existingRole, v1.Role{}) {
+				if existingRole.Name == "" {
 					log.Info(fmt.Sprintf("creating role %s for Argo CD instance %s in namespace %s", role.Name, cr.Name, namespace))
 					if err := r.Client.Create(ctx, role); err != nil {
 						return fmt.Errorf("failed to create role for %s: %w", name, err)
@@ -254,21 +255,31 @@ func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx contex
 				continue
 			}
 
-			// Get the latest value of namespace before updating it
-			if err := r.Client.Get(ctx, types.NamespacedName{Name: namespace.Name}, namespace); err != nil {
-				return fmt.Errorf("failed to get latest namespace for %s: %w", name, err)
-			}
 			// Update namespace with managed-by-cluster-argocd label
-			namespace.Labels[common.ArgoCDManagedByClusterArgoCDLabel] = cr.Namespace
-			if err := r.Client.Update(ctx, namespace); err != nil {
-				return fmt.Errorf("failed to add label from namespace [%s]: %w", namespace.Name, err)
+			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				// Get the latest value of namespace before updating it
+				if err := r.Client.Get(ctx, types.NamespacedName{Name: namespace.Name}, namespace); err != nil {
+					return fmt.Errorf("failed to get latest namespace for %s: %w", name, err)
+				}
+				namespace.Labels[common.ArgoCDManagedByClusterArgoCDLabel] = cr.Namespace
+				return r.Client.Update(ctx, namespace)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to update label from namespace [%s]: %w", namespace.Name, err)
 			}
 			// if the Rules differ, update the Role
-			if !reflect.DeepEqual(existingRole.Rules, role.Rules) {
-				existingRole.Rules = role.Rules
-				if err := r.Client.Update(ctx, &existingRole); err != nil {
-					return fmt.Errorf("failed to update role for %s: %w", name, err)
+			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if err := r.Client.Get(ctx, types.NamespacedName{Name: role.Name, Namespace: namespace.Name}, &existingRole); err != nil && !errors.IsNotFound(err) {
+					return fmt.Errorf("failed to get latest role for %s: %w", name, err)
 				}
+				if !reflect.DeepEqual(existingRole.Rules, role.Rules) {
+					existingRole.Rules = role.Rules
+					return r.Client.Update(ctx, &existingRole)
+				}
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("failed to update role for %s: %w", name, err)
 			}
 
 			if _, ok := r.ManagedSourceNamespaces[sourceNamespace]; !ok {
