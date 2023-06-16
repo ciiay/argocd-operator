@@ -236,39 +236,41 @@ func (r *ReconcileArgoCD) reconcileRoleForApplicationSourceNamespaces(ctx contex
 
 		// Check if the namespace is managed by current ArgoCD instance with managed-by-cluster-argocd label
 		if _, ok := r.ManagedSourceNamespaces[sourceNamespace]; ok {
-			// If it's managed by current ArgoCD instance, create role if does not exist
-			if err := r.createRoleIfNotExists(ctx, expectedRole, namespace.Name, cr.Name); err != nil {
+			// If it's already managed by current ArgoCD instance, only check if the required role is missing
+			// no need to reconcile as it's already reconciled in reconciliation of ManagedNamespaces
+			if err := r.createOrUpdateRole(ctx, expectedRole, namespace.Name, cr.Name, false); err != nil {
 				return err
 			}
-			// Continue to the next sourceNamespace in the loop
-			continue
-		}
-
-		// Check if another ArgoCD instance is already set as value of managed-by-cluster-argocd label
-		if isManagedByClusterArgoCDLabelPresent && managedByClusterArgocdVal != "" {
-			log.Info("Namespace already has managed-by-cluster-argocd label set to another ArgoCD instance, skipping", "namespace", namespace.Name, "ArgoCD", managedByClusterArgocdVal)
-			continue
-		}
-
-		// Create/Update role and update the namespace label after successfully reconciled role
-		if err := r.createOrUpdateRole(ctx, expectedRole, namespace, cr); err != nil {
-			return err
-		}
-
-		// Save sourceNamespace to ManagedSourceNamespaces map as sourceNamespace label has been updated successfully
-		if _, ok := r.ManagedSourceNamespaces[sourceNamespace]; !ok {
-			r.ManagedSourceNamespaces[sourceNamespace] = ""
+			// Check if another ArgoCD instance is already set as value of managed-by-cluster-argocd label
+		} else if !(isManagedByClusterArgoCDLabelPresent && managedByClusterArgocdVal != "") {
+			// If it's not managed by another ArgoCD instance, need to create/update the role
+			if err := r.createOrUpdateRole(ctx, expectedRole, namespace.Name, cr.Name, true); err != nil {
+				return err
+			}
+			// Save sourceNamespace to ManagedSourceNamespaces map as sourceNamespace label has been updated successfully
+			if _, ok := r.ManagedSourceNamespaces[sourceNamespace]; !ok {
+				r.ManagedSourceNamespaces[sourceNamespace] = ""
+			}
 		}
 	}
 	return nil
 }
 
-func (r *ReconcileArgoCD) createRoleIfNotExists(ctx context.Context, role *v1.Role, namespace, crName string) error {
+func (r *ReconcileArgoCD) createOrUpdateRole(ctx context.Context, role *v1.Role, namespace, crName string, shouldUpdate bool) error {
 	existingRole := &v1.Role{}
 	err := r.Client.Get(ctx, types.NamespacedName{Name: role.Name, Namespace: namespace}, existingRole)
 	switch {
 	case err == nil:
-		log.Info("Role already exists, skipping creation", "role", role.Name, "namespace", namespace)
+		if shouldUpdate && !reflect.DeepEqual(existingRole.Rules, role.Rules) {
+			existingRole.Rules = role.Rules
+			if err := r.Client.Update(ctx, existingRole); err != nil {
+				log.Error(err, "Failed to update role", "role", role.Name, "namespace", namespace)
+				return err
+			}
+			log.Info("Role rules updated successfully", "role", role.Name, "namespace", namespace)
+		} else {
+			log.Info("Role already exists, skipping creation", "role", role.Name, "namespace", namespace)
+		}
 	case errors.IsNotFound(err):
 		log.Info("Creating new role", "role", role.Name, "namespace", namespace, "ArgoCD", crName)
 		if err := r.Client.Create(ctx, role); err != nil {
@@ -279,40 +281,6 @@ func (r *ReconcileArgoCD) createRoleIfNotExists(ctx context.Context, role *v1.Ro
 		log.Error(err, "Failed to get role", "role", role.Name, "namespace", namespace)
 		return err
 	}
-	return nil
-}
-
-func (r *ReconcileArgoCD) createOrUpdateRole(ctx context.Context, role *v1.Role, namespace *corev1.Namespace, cr *argoprojv1a1.ArgoCD) error {
-	existingRole := &v1.Role{}
-	err := r.Client.Get(ctx, types.NamespacedName{Name: role.Name, Namespace: namespace.Name}, existingRole)
-	switch {
-	case err == nil:
-		if !reflect.DeepEqual(existingRole.Rules, role.Rules) {
-			existingRole.Rules = role.Rules
-			if err := r.Client.Update(ctx, existingRole); err != nil {
-				log.Error(err, "Failed to update role", "role", role.Name, "namespace", namespace.Name)
-				return err
-			}
-			log.Info("Role rules updated successfully", "role", role.Name, "namespace", namespace.Name)
-		}
-	case errors.IsNotFound(err):
-		log.Info("Creating new role", "role", role.Name, "namespace", namespace.Name, "ArgoCD", cr.Name)
-		if err := r.Client.Create(ctx, role); err != nil {
-			log.Error(err, "Failed to create role", "role", role.Name, "namespace", namespace.Name)
-			return err
-		}
-	default:
-		log.Error(err, "Failed to get role", "role", role.Name, "namespace", namespace.Name)
-		return err
-	}
-
-	// Update namespace with managed-by-cluster-argocd label as required role has been successfully created/updated
-	namespace.Labels[common.ArgoCDManagedByClusterArgoCDLabel] = cr.Namespace
-	if err := r.Client.Update(ctx, namespace); err != nil {
-		log.Error(err, "Failed to update namespace label", "namespace", namespace.Name)
-		return err
-	}
-	log.Info("Namespace label updated successfully", "namespace", namespace.Name)
 	return nil
 }
 
